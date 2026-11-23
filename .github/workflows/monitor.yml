@@ -1,0 +1,132 @@
+name: Monitor
+
+on:
+  # Vom WordPress-Plugin nach Updates (gebündelt) oder per Knopf im Backend
+  repository_dispatch:
+    types: [wp-updated]
+  # Zeitplan (UTC): täglich ca. 05:40 Uhr Winterzeit, montags Volltest
+  schedule:
+    - cron: '40 4 * * *'
+    - cron: '52 4 * * 1'
+  # Manuell in GitHub unter Actions → Monitor → Run workflow
+  workflow_dispatch:
+    inputs:
+      with_order:
+        description: 'Testbestellung ausführen'
+        type: boolean
+        default: false
+      update_screenshots:
+        description: 'Aktuelle Darstellung als neue Referenzbilder übernehmen'
+        type: boolean
+        default: false
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SITE_URL: ${{ vars.SITE_URL }}
+      MONITOR_KEY: ${{ secrets.MONITOR_KEY }}
+      TEST_EMAIL: ${{ vars.TEST_EMAIL }}
+      IMAP_HOST: ${{ vars.IMAP_HOST }}
+      IMAP_PORT: ${{ vars.IMAP_PORT }}
+      IMAP_USER: ${{ vars.TEST_EMAIL }}
+      IMAP_PASS: ${{ secrets.TEST_EMAIL_PASS }}
+      TEST_ACCOUNT_PASS: ${{ secrets.TEST_ACCOUNT_PASS }}
+      TEST_PRODUCT_URL: ${{ vars.TEST_PRODUCT_URL }}
+      PAYMENT_LOGO_MAX_HEIGHT: ${{ vars.PAYMENT_LOGO_MAX_HEIGHT }}
+      EXPECT_MAIL_IMAGES: ${{ vars.EXPECT_MAIL_IMAGES }}
+      SMTP_HOST: ${{ vars.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+      SMTP_USER: ${{ vars.TEST_EMAIL }}
+      SMTP_PASS: ${{ secrets.TEST_EMAIL_PASS }}
+      REPORT_TO: ${{ vars.REPORT_TO }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      CHANGES_JSON: ${{ toJSON(github.event.client_payload.changes) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Laufart bestimmen
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          P_RUN_TYPE: ${{ github.event.client_payload.run_type }}
+          P_WITH_ORDER: ${{ github.event.client_payload.with_order }}
+          I_WITH_ORDER: ${{ inputs.with_order }}
+          SCHEDULE: ${{ github.event.schedule }}
+          WEEKLY_ORDER: ${{ vars.WITH_ORDER_WEEKLY }}
+        run: |
+          WITH_ORDER=false
+          RUN_TYPE=daily
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            RUN_TYPE="$(echo "$P_RUN_TYPE" | tr -cd 'a-z-')"
+            WITH_ORDER="$P_WITH_ORDER"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            RUN_TYPE=manual
+            WITH_ORDER="$I_WITH_ORDER"
+          elif [ "$SCHEDULE" = "52 4 * * 1" ]; then
+            RUN_TYPE=weekly
+            WITH_ORDER="$WEEKLY_ORDER"
+          fi
+          [ "$WITH_ORDER" = "true" ] || WITH_ORDER=false
+          [ -n "$RUN_TYPE" ] || RUN_TYPE=after-update
+          echo "RUN_TYPE=$RUN_TYPE" >> "$GITHUB_ENV"
+          echo "WITH_ORDER=$WITH_ORDER" >> "$GITHUB_ENV"
+          echo "Laufart: $RUN_TYPE, Testbestellung: $WITH_ORDER"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Browser installieren
+        run: npx playwright install --with-deps chromium
+
+      # --- Referenzbilder neu erstellen (nur manuell) ---
+      - name: Referenzbilder aktualisieren
+        if: ${{ inputs.update_screenshots }}
+        run: |
+          npx playwright test --update-snapshots --grep @visual || true
+          git config user.name "monitor-bot"
+          git config user.email "monitor-bot@users.noreply.github.com"
+          git add tests/__screenshots__
+          git commit -m "Neue Referenzbilder $(date +%F)" || echo "Keine Änderungen"
+          git push
+
+      # --- Normaler Testlauf ---
+      - name: Tests ausführen
+        id: tests
+        if: ${{ !inputs.update_screenshots }}
+        continue-on-error: true
+        run: npx playwright test
+
+      - name: Protokoll-Mail senden
+        if: ${{ always() && !inputs.update_screenshots }}
+        run: node scripts/report.mjs
+
+      - name: Bericht speichern
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bericht-${{ github.run_number }}
+          path: |
+            playwright-report
+            test-results
+            results
+          retention-days: 30
+
+      - name: Ergebnis
+        if: ${{ steps.tests.outcome == 'failure' }}
+        run: |
+          echo "Mindestens eine Prüfung ist fehlgeschlagen – siehe Protokoll-Mail und Bericht."
+          exit 1
