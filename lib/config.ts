@@ -2,7 +2,8 @@
  * Zentrale Einstellungen. Werte kommen aus GitHub (Secrets/Variables) als
  * Umgebungsvariablen; die Standardwerte passen zu werthonig.de.
  */
-const env = (name: string, fallback = '') => (process.env[name] ?? fallback).trim();
+// GitHub übergibt nicht gesetzte Variablen als leeren Text – dann gilt der Standardwert.
+const env = (name: string, fallback = '') => (process.env[name] || '').trim() || fallback;
 
 export const SITE_URL = env('SITE_URL', 'https://werthonig.de').replace(/\/$/, '');
 export const MONITOR_KEY = env('MONITOR_KEY');
@@ -50,6 +51,7 @@ export const DYNAMIC_SELECTORS = [
   'video', 'iframe',
   '[class*="instagram"]', '[id*="instagram"]', '[class*="sbi"]', // Instagram-Feeds
   '.latest_post_holder', '.blog_holder', // Aktuelles
+  '.related.products', '.upsells', '.cross-sells', // Produktempfehlungen (zufällige Reihenfolge)
 ];
 
 /** Tracking, das im Testbrowser blockiert wird, damit die Statistik sauber bleibt. */
