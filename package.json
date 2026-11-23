@@ -1,0 +1,20 @@
+{
+  "name": "werthonig-monitor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:update-screenshots": "playwright test --update-snapshots --project=desktop --project=mobile --grep @visual",
+    "report": "node scripts/report.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "imapflow": "^1.0.190",
+    "mailparser": "^3.7.0",
+    "nodemailer": "^7.0.0"
+  }
+}
