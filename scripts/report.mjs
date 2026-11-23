@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import nodemailer from 'nodemailer';
 
-const env = (k, d = '') => (process.env[k] ?? d).trim();
+// GitHub übergibt nicht gesetzte Variablen als leeren Text – dann gilt der Standardwert.
+const env = (k, d = '') => (process.env[k] || '').trim() || d;
 const SITE_URL = env('SITE_URL', 'https://werthonig.de').replace(/\/$/, '');
 const RUN_URL = env('RUN_URL');
 const RUN_TYPE = env('RUN_TYPE', 'manual');
@@ -35,7 +36,7 @@ const walk = (suite, prefix = []) => {
   for (const spec of suite.specs ?? []) {
     for (const t of spec.tests ?? []) {
       const last = t.results?.[t.results.length - 1];
-      const errors = (last?.errors ?? []).map((e) => stripAnsi(e.message).split('\n').slice(0, 6).join('\n'));
+      const errors = (last?.errors ?? []).map((e) => stripAnsi(e.message).split('\n').filter((l) => l.trim() && !/^\s*at /.test(l)).slice(0, 25).join('\n'));
       tests.push({
         title: [...title, spec.title].join(' › ').replace(/\s*@visual/g, ''),
         project: t.projectName,
